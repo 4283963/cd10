@@ -21,6 +21,7 @@
         const driveSlider = document.getElementById('driveSlider');
         const warmthSlider = document.getElementById('warmthSlider');
         const presenceSlider = document.getElementById('presenceSlider');
+        const vinylSwitch = document.getElementById('vinylSwitch');
 
         audioFile.addEventListener('change', handleFileSelect);
         
@@ -31,6 +32,8 @@
         stopBtn.addEventListener('click', handleStop);
         
         tubeSelect.addEventListener('change', handleTubeChange);
+        
+        vinylSwitch.addEventListener('change', handleVinylToggle);
         
         volumeSlider.addEventListener('input', (e) => {
             const value = e.target.value / 100;
@@ -94,6 +97,15 @@
         currentTubeModel = e.target.value;
         loadTubeParams(currentTubeModel);
         updateTubeInfo();
+    }
+
+    function handleVinylToggle(e) {
+        const isOn = e.target.checked;
+        if (isOn) {
+            TubeAmpProcessor.enableVinyl();
+        } else {
+            TubeAmpProcessor.disableVinyl();
+        }
     }
 
     function updateTubeInfo() {

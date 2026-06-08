@@ -24,6 +24,8 @@ const TubeAmpProcessor = (function() {
     let animationId = null;
     let audioGraphReady = false;
     let fadeTimer = null;
+    let outputMixer = null;
+    let vinylEnabled = false;
 
     const targetParams = {
         gainFactor: 1.8,
@@ -152,6 +154,9 @@ const TubeAmpProcessor = (function() {
         gainNode = audioContext.createGain();
         gainNode.gain.value = targetVolume;
 
+        outputMixer = audioContext.createGain();
+        outputMixer.gain.value = 1.0;
+
         splitter = audioContext.createChannelSplitter(2);
         merger = audioContext.createChannelMerger(2);
 
@@ -169,12 +174,18 @@ const TubeAmpProcessor = (function() {
         tubeProcessor.connect(warmFilter);
         warmFilter.connect(trebleFilter);
         trebleFilter.connect(gainNode);
-        gainNode.connect(splitter);
+        gainNode.connect(outputMixer);
+        outputMixer.connect(splitter);
         splitter.connect(analyserL, 0);
         splitter.connect(analyserR, 1);
         analyserL.connect(merger, 0, 0);
         analyserR.connect(merger, 0, 1);
         merger.connect(audioContext.destination);
+
+        if (typeof VinylEffect !== 'undefined') {
+            VinylEffect.init(audioContext);
+            VinylEffect.connect(outputMixer);
+        }
 
         audioGraphReady = true;
     }
@@ -545,6 +556,42 @@ const TubeAmpProcessor = (function() {
         return audioContext;
     }
 
+    function enableVinyl() {
+        vinylEnabled = true;
+        if (typeof VinylEffect !== 'undefined' && audioContext) {
+            if (!audioGraphReady) {
+                createAudioGraph();
+            }
+            VinylEffect.enable();
+        }
+    }
+
+    function disableVinyl() {
+        vinylEnabled = false;
+        if (typeof VinylEffect !== 'undefined') {
+            VinylEffect.disable();
+        }
+    }
+
+    function toggleVinyl() {
+        if (vinylEnabled) {
+            disableVinyl();
+        } else {
+            enableVinyl();
+        }
+        return vinylEnabled;
+    }
+
+    function isVinylEnabled() {
+        return vinylEnabled;
+    }
+
+    function setVinylIntensity(value) {
+        if (typeof VinylEffect !== 'undefined') {
+            VinylEffect.setIntensity(value);
+        }
+    }
+
     return {
         init,
         resume,
@@ -559,6 +606,11 @@ const TubeAmpProcessor = (function() {
         setDrive,
         setWarmth,
         setPresence,
+        enableVinyl,
+        disableVinyl,
+        toggleVinyl,
+        isVinylEnabled,
+        setVinylIntensity,
         getCurrentTime,
         getDuration,
         getWaveformData,
