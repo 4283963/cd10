@@ -1,0 +1,11 @@
+{
+  "name": "tube-amp-simulator-frontend",
+  "version": "1.0.0",
+  "description": "复古电子管放大器仿真系统 - 前端",
+  "scripts": {
+    "start": "python3 -m http.server 3000",
+    "dev": "python3 -m http.server 3000"
+  },
+  "keywords": ["tube-amp", "audio", "web-audio-api", "simulator"],
+  "license": "MIT"
+}

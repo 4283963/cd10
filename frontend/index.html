@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>复古电子管放大器仿真系统 | Vintage Tube Amp Simulator</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="amp-container">
+        <div class="amp-top">
+            <div class="brand-logo">
+                <span class="brand-text">TUBE AUDIO</span>
+                <span class="brand-sub">VINTAGE AMP SIMULATOR</span>
+            </div>
+        </div>
+
+        <div class="amp-body">
+            <div class="tube-section">
+                <div class="tube-glow-area">
+                    <div class="tube left-tube">
+                        <div class="tube-glass"></div>
+                        <div class="tube-filament"></div>
+                        <div class="tube-base"></div>
+                        <div class="tube-label">V1</div>
+                    </div>
+                    <div class="tube center-tube">
+                        <div class="tube-glass"></div>
+                        <div class="tube-filament"></div>
+                        <div class="tube-base"></div>
+                        <div class="tube-label">V2</div>
+                    </div>
+                    <div class="tube right-tube">
+                        <div class="tube-glass"></div>
+                        <div class="tube-filament"></div>
+                        <div class="tube-base"></div>
+                        <div class="tube-label">V3</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="vu-meter-section">
+                <div class="vu-meter left-vu">
+                    <div class="vu-scale">
+                        <div class="vu-scale-marks"></div>
+                        <div class="vu-scale-labels">
+                            <span>-20</span><span>-10</span><span>-5</span><span>0</span><span>+3</span>
+                        </div>
+                    </div>
+                    <div class="vu-needle-wrapper">
+                        <div class="vu-needle" id="vuNeedleL"></div>
+                    </div>
+                    <div class="vu-label">L / CHANNEL 1</div>
+                </div>
+                <div class="vu-meter right-vu">
+                    <div class="vu-scale">
+                        <div class="vu-scale-marks"></div>
+                        <div class="vu-scale-labels">
+                            <span>-20</span><span>-10</span><span>-5</span><span>0</span><span>+3</span>
+                        </div>
+                    </div>
+                    <div class="vu-needle-wrapper">
+                        <div class="vu-needle" id="vuNeedleR"></div>
+                    </div>
+                    <div class="vu-label">R / CHANNEL 2</div>
+                </div>
+            </div>
+
+            <div class="controls-section">
+                <div class="control-group">
+                    <label class="control-label">电子管型号</label>
+                    <select class="tube-select" id="tubeSelect">
+                        <option value="300B">300B - 三极胆王</option>
+                        <option value="KT88">KT88 - 束射四极</option>
+                        <option value="EL34">EL34 - 英国五极</option>
+                        <option value="6L6">6L6 - 美式经典</option>
+                        <option value="EL84">EL84 - 小功率五极</option>
+                        <option value="6V6">6V6 - 温暖圆润</option>
+                        <option value="2A3">2A3 - 极致顺滑</option>
+                        <option value="6550">6550 - 大功率控制</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label class="control-label">音量</label>
+                    <div class="knob-container">
+                        <div class="knob" id="volumeKnob"></div>
+                        <input type="range" class="slider" id="volumeSlider" min="0" max="100" value="60">
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label class="control-label">增益 Drive</label>
+                    <div class="knob-container">
+                        <div class="knob" id="driveKnob"></div>
+                        <input type="range" class="slider" id="driveSlider" min="0" max="100" value="40">
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label class="control-label">胆味 Warmth</label>
+                    <div class="knob-container">
+                        <div class="knob" id="warmthKnob"></div>
+                        <input type="range" class="slider" id="warmthSlider" min="0" max="100" value="50">
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label class="control-label"> Presence</label>
+                    <div class="knob-container">
+                        <div class="knob" id="presenceKnob"></div>
+                        <input type="range" class="slider" id="presenceSlider" min="0" max="100" value="50">
+                    </div>
+                </div>
+            </div>
+
+            <div class="input-section">
+                <div class="input-controls">
+                    <div class="file-upload">
+                        <label class="upload-btn" for="audioFile">
+                            <span class="upload-icon">♪</span>
+                            <span>上传 MP3</span>
+                        </label>
+                        <input type="file" id="audioFile" accept="audio/*" hidden>
+                    </div>
+                    
+                    <button class="mic-btn" id="micBtn">
+                        <span class="mic-icon">🎤</span>
+                        <span>麦克风输入</span>
+                    </button>
+
+                    <button class="play-btn" id="playBtn" disabled>
+                        <span class="play-icon">▶</span>
+                        <span>播放</span>
+                    </button>
+
+                    <button class="stop-btn" id="stopBtn" disabled>
+                        <span class="stop-icon">■</span>
+                        <span>停止</span>
+                    </button>
+                </div>
+
+                <div class="track-info">
+                    <div class="track-name" id="trackName">未选择音频文件</div>
+                    <div class="track-time" id="trackTime">00:00 / 00:00</div>
+                </div>
+            </div>
+
+            <div class="waveform-section">
+                <canvas id="waveformCanvas" class="waveform-canvas"></canvas>
+            </div>
+        </div>
+
+        <div class="amp-bottom">
+            <div class="power-indicator">
+                <div class="power-led" id="powerLed"></div>
+                <span>POWER</span>
+            </div>
+            <div class="tube-info" id="tubeInfo">
+                <span class="tube-model-name">300B</span>
+                <span class="tube-type-badge">TRIODE</span>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/api-client.js"></script>
+    <script src="js/audio-processor.js"></script>
+    <script src="js/visual-effects.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

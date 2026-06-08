@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS tube_models (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    model_name VARCHAR(50) NOT NULL UNIQUE,
+    tube_type VARCHAR(50) NOT NULL,
+    description VARCHAR(500),
+    gain_factor DOUBLE NOT NULL,
+    second_harmonic_coeff DOUBLE NOT NULL,
+    third_harmonic_coeff DOUBLE NOT NULL,
+    fourth_harmonic_coeff DOUBLE NOT NULL,
+    soft_clip_threshold DOUBLE NOT NULL,
+    soft_clip_knee DOUBLE NOT NULL,
+    warm_factor DOUBLE NOT NULL,
+    bass_boost DOUBLE NOT NULL DEFAULT 1.0,
+    treble_cut DOUBLE NOT NULL DEFAULT 1.0,
+    plate_voltage DOUBLE,
+    cathode_bias DOUBLE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_model_name (model_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
