@@ -2,7 +2,7 @@ const TubeAmpProcessor = (function() {
     let audioContext = null;
     let sourceNode = null;
     let gainNode = null;
-    let driveGainNode = null;
+    let inputGainNode = null;
     let tubeProcessor = null;
     let analyserL = null;
     let analyserR = null;
@@ -18,14 +18,49 @@ const TubeAmpProcessor = (function() {
     let micSource = null;
     let startTime = 0;
     let pauseTime = 0;
-    let currentTubeParams = null;
     let onLevelUpdate = null;
     let onWaveformUpdate = null;
     let waveformData = null;
     let animationId = null;
-    let warmthAmount = 0.5;
-    let driveAmount = 0.4;
-    let presenceAmount = 0.5;
+    let audioGraphReady = false;
+    let fadeTimer = null;
+
+    const targetParams = {
+        gainFactor: 1.8,
+        secondHarmonicCoeff: 0.15,
+        thirdHarmonicCoeff: 0.05,
+        fourthHarmonicCoeff: 0.02,
+        softClipThreshold: 0.75,
+        softClipKnee: 0.35,
+        warmFactor: 0.85,
+        bassBoost: 1.15,
+        trebleCut: 0.92
+    };
+
+    const currentParams = {
+        gainFactor: 1.8,
+        secondHarmonicCoeff: 0.15,
+        thirdHarmonicCoeff: 0.05,
+        fourthHarmonicCoeff: 0.02,
+        softClipThreshold: 0.75,
+        softClipKnee: 0.35,
+        warmFactor: 0.85,
+        bassBoost: 1.15,
+        trebleCut: 0.92
+    };
+
+    let targetDrive = 0.4;
+    let currentDrive = 0.4;
+    let targetWarmth = 0.5;
+    let currentWarmth = 0.5;
+    let targetPresence = 0.5;
+    let currentPresence = 0.5;
+    let targetVolume = 0.6;
+    let currentVolume = 0.6;
+
+    const BLOCKS_PER_SECOND = 48000 / 2048;
+    const SMOOTHING_TIME_CONSTANT = 0.08;
+    const PARAM_SMOOTHING = 1 - Math.exp(-1 / (BLOCKS_PER_SECOND * SMOOTHING_TIME_CONSTANT));
 
     function init() {
         if (!audioContext) {
@@ -41,43 +76,84 @@ const TubeAmpProcessor = (function() {
     }
 
     function setTubeParams(params) {
-        currentTubeParams = params;
+        if (!params) return;
+
+        targetParams.gainFactor = params.gainFactor || 1.0;
+        targetParams.secondHarmonicCoeff = params.secondHarmonicCoeff || 0;
+        targetParams.thirdHarmonicCoeff = params.thirdHarmonicCoeff || 0;
+        targetParams.fourthHarmonicCoeff = params.fourthHarmonicCoeff || 0;
+        targetParams.softClipThreshold = params.softClipThreshold || 0.8;
+        targetParams.softClipKnee = params.softClipKnee || 0.3;
+        targetParams.warmFactor = params.warmFactor || 0.5;
+        targetParams.bassBoost = params.bassBoost || 1.0;
+        targetParams.trebleCut = params.trebleCut || 1.0;
+
+        if (bassFilter && audioContext) {
+            const bassGainDb = 20 * Math.log10(targetParams.bassBoost);
+            bassFilter.gain.setTargetAtTime(bassGainDb, audioContext.currentTime, SMOOTHING_TIME_CONSTANT);
+        }
     }
 
     function setVolume(value) {
-        if (gainNode) {
-            gainNode.gain.setValueAtTime(value, audioContext.currentTime);
+        targetVolume = value;
+        if (gainNode && audioContext) {
+            gainNode.gain.setTargetAtTime(value, audioContext.currentTime, 0.02);
         }
     }
 
     function setDrive(value) {
-        driveAmount = value;
+        targetDrive = value;
     }
 
     function setWarmth(value) {
-        warmthAmount = value;
-        if (warmFilter) {
+        targetWarmth = value;
+        if (warmFilter && audioContext) {
             const freq = 200 + (1 - value) * 1800;
-            warmFilter.frequency.setValueAtTime(freq, audioContext.currentTime);
+            warmFilter.frequency.setTargetAtTime(freq, audioContext.currentTime, 0.06);
         }
     }
 
     function setPresence(value) {
-        presenceAmount = value;
-        if (trebleFilter) {
+        targetPresence = value;
+        if (trebleFilter && audioContext) {
             const gain = (value - 0.5) * 12;
-            trebleFilter.gain.setValueAtTime(gain, audioContext.currentTime);
+            trebleFilter.gain.setTargetAtTime(gain, audioContext.currentTime, 0.06);
         }
     }
 
     function createAudioGraph() {
+        if (audioGraphReady) return;
         if (!audioContext) init();
 
-        gainNode = audioContext.createGain();
-        gainNode.gain.value = 0.6;
+        inputGainNode = audioContext.createGain();
+        inputGainNode.gain.value = 0;
 
-        driveGainNode = audioContext.createGain();
+        bassFilter = audioContext.createBiquadFilter();
+        bassFilter.type = 'lowshelf';
+        bassFilter.frequency.value = 200;
+        bassFilter.gain.value = 20 * Math.log10(targetParams.bassBoost);
+
+        const driveGainNode = audioContext.createGain();
         driveGainNode.gain.value = 1.0;
+
+        tubeProcessor = audioContext.createScriptProcessor(2048, 2, 2);
+        tubeProcessor.onaudioprocess = processTubeAudio;
+
+        warmFilter = audioContext.createBiquadFilter();
+        warmFilter.type = 'lowpass';
+        warmFilter.frequency.value = 200 + (1 - targetWarmth) * 1800;
+        warmFilter.Q.value = 0.7;
+
+        trebleFilter = audioContext.createBiquadFilter();
+        trebleFilter.type = 'highshelf';
+        trebleFilter.frequency.value = 3000;
+        trebleFilter.gain.value = 0;
+
+        gainNode = audioContext.createGain();
+        gainNode.gain.value = targetVolume;
+
+        splitter = audioContext.createChannelSplitter(2);
+        merger = audioContext.createChannelMerger(2);
 
         analyserL = audioContext.createAnalyser();
         analyserL.fftSize = 2048;
@@ -87,68 +163,96 @@ const TubeAmpProcessor = (function() {
         analyserR.fftSize = 2048;
         analyserR.smoothingTimeConstant = 0.85;
 
-        splitter = audioContext.createChannelSplitter(2);
-        merger = audioContext.createChannelMerger(2);
+        inputGainNode.connect(bassFilter);
+        bassFilter.connect(driveGainNode);
+        driveGainNode.connect(tubeProcessor);
+        tubeProcessor.connect(warmFilter);
+        warmFilter.connect(trebleFilter);
+        trebleFilter.connect(gainNode);
+        gainNode.connect(splitter);
+        splitter.connect(analyserL, 0);
+        splitter.connect(analyserR, 1);
+        analyserL.connect(merger, 0, 0);
+        analyserR.connect(merger, 0, 1);
+        merger.connect(audioContext.destination);
 
-        bassFilter = audioContext.createBiquadFilter();
-        bassFilter.type = 'lowshelf';
-        bassFilter.frequency.value = 200;
-        bassFilter.gain.value = 0;
+        audioGraphReady = true;
+    }
 
-        trebleFilter = audioContext.createBiquadFilter();
-        trebleFilter.type = 'highshelf';
-        trebleFilter.frequency.value = 3000;
-        trebleFilter.gain.value = 0;
+    function smoothParam(current, target, smoothing) {
+        return current + (target - current) * smoothing;
+    }
 
-        warmFilter = audioContext.createBiquadFilter();
-        warmFilter.type = 'lowpass';
-        warmFilter.frequency.value = 12000;
-        warmFilter.Q.value = 0.7;
-
-        const bufferSize = 2048;
-        tubeProcessor = audioContext.createScriptProcessor(bufferSize, 2, 2);
-        tubeProcessor.onaudioprocess = processTubeAudio;
+    function updateSmoothedParams() {
+        const s = PARAM_SMOOTHING;
+        currentParams.gainFactor = smoothParam(currentParams.gainFactor, targetParams.gainFactor, s);
+        currentParams.secondHarmonicCoeff = smoothParam(currentParams.secondHarmonicCoeff, targetParams.secondHarmonicCoeff, s);
+        currentParams.thirdHarmonicCoeff = smoothParam(currentParams.thirdHarmonicCoeff, targetParams.thirdHarmonicCoeff, s);
+        currentParams.fourthHarmonicCoeff = smoothParam(currentParams.fourthHarmonicCoeff, targetParams.fourthHarmonicCoeff, s);
+        currentParams.softClipThreshold = smoothParam(currentParams.softClipThreshold, targetParams.softClipThreshold, s);
+        currentParams.softClipKnee = smoothParam(currentParams.softClipKnee, targetParams.softClipKnee, s);
+        currentParams.warmFactor = smoothParam(currentParams.warmFactor, targetParams.warmFactor, s);
+        currentDrive = smoothParam(currentDrive, targetDrive, s);
+        currentWarmth = smoothParam(currentWarmth, targetWarmth, s);
+        currentPresence = smoothParam(currentPresence, targetPresence, s);
+        currentVolume = smoothParam(currentVolume, targetVolume, s * 1.5);
     }
 
     function processTubeAudio(e) {
-        if (!currentTubeParams) {
-            const inputL = e.inputBuffer.getChannelData(0);
-            const inputR = e.inputBuffer.getChannelData(1);
-            const outputL = e.outputBuffer.getChannelData(0);
-            const outputR = e.outputBuffer.getChannelData(1);
-            for (let i = 0; i < e.inputBuffer.length; i++) {
-                outputL[i] = inputL[i];
-                outputR[i] = inputR[i];
-            }
-            return;
-        }
-
         const inputL = e.inputBuffer.getChannelData(0);
         const inputR = e.inputBuffer.getChannelData(1);
         const outputL = e.outputBuffer.getChannelData(0);
         const outputR = e.outputBuffer.getChannelData(1);
+        const bufferLength = e.inputBuffer.length;
 
-        const {
-            gainFactor,
-            secondHarmonicCoeff,
-            thirdHarmonicCoeff,
-            fourthHarmonicCoeff,
-            softClipThreshold,
-            softClipKnee,
-            warmFactor
-        } = currentTubeParams;
+        const prevGain = currentParams.gainFactor;
+        const prevH2 = currentParams.secondHarmonicCoeff;
+        const prevH3 = currentParams.thirdHarmonicCoeff;
+        const prevH4 = currentParams.fourthHarmonicCoeff;
+        const prevThreshold = currentParams.softClipThreshold;
+        const prevKnee = currentParams.softClipKnee;
+        const prevWarmFactor = currentParams.warmFactor;
+        const prevDrive = currentDrive;
+        const prevWarmth = currentWarmth;
 
-        const drive = 1 + driveAmount * 3;
-        const totalGain = gainFactor * drive;
-        const warmthMix = warmFactor * warmthAmount;
+        updateSmoothedParams();
 
-        for (let i = 0; i < e.inputBuffer.length; i++) {
-            outputL[i] = processSample(inputL[i], totalGain, secondHarmonicCoeff, 
-                thirdHarmonicCoeff, fourthHarmonicCoeff, softClipThreshold, 
-                softClipKnee, warmthMix);
-            outputR[i] = processSample(inputR[i], totalGain, secondHarmonicCoeff, 
-                thirdHarmonicCoeff, fourthHarmonicCoeff, softClipThreshold, 
-                softClipKnee, warmthMix);
+        const gainStep = (currentParams.gainFactor - prevGain) / bufferLength;
+        const h2Step = (currentParams.secondHarmonicCoeff - prevH2) / bufferLength;
+        const h3Step = (currentParams.thirdHarmonicCoeff - prevH3) / bufferLength;
+        const h4Step = (currentParams.fourthHarmonicCoeff - prevH4) / bufferLength;
+        const thresholdStep = (currentParams.softClipThreshold - prevThreshold) / bufferLength;
+        const kneeStep = (currentParams.softClipKnee - prevKnee) / bufferLength;
+        const warmFactorStep = (currentParams.warmFactor - prevWarmFactor) / bufferLength;
+        const driveStep = (currentDrive - prevDrive) / bufferLength;
+        const warmthStep = (currentWarmth - prevWarmth) / bufferLength;
+
+        let gain = prevGain;
+        let h2 = prevH2;
+        let h3 = prevH3;
+        let h4 = prevH4;
+        let threshold = prevThreshold;
+        let knee = prevKnee;
+        let warmFactor = prevWarmFactor;
+        let drive = prevDrive;
+        let warmth = prevWarmth;
+
+        for (let i = 0; i < bufferLength; i++) {
+            const totalGain = gain * (1 + drive * 3);
+            const warmthMix = warmFactor * warmth;
+
+            outputL[i] = processSample(inputL[i], totalGain, h2, h3, h4, threshold, knee, warmthMix);
+            outputR[i] = processSample(inputR[i], totalGain, h2, h3, h4, threshold, knee, warmthMix);
+
+            gain += gainStep;
+            h2 += h2Step;
+            h3 += h3Step;
+            h4 += h4Step;
+            threshold += thresholdStep;
+            knee += kneeStep;
+            warmFactor += warmFactorStep;
+            drive += driveStep;
+            warmth += warmthStep;
         }
     }
 
@@ -203,89 +307,125 @@ const TubeAmpProcessor = (function() {
         return audioBuffer;
     }
 
+    function connectSource(source) {
+        if (!audioGraphReady) {
+            createAudioGraph();
+        }
+        source.connect(inputGainNode);
+    }
+
+    function disconnectSource(source) {
+        try {
+            source.disconnect(inputGainNode);
+        } catch (e) {}
+    }
+
+    function fadeIn(duration = 0.05) {
+        if (!inputGainNode || !audioContext) return;
+        const now = audioContext.currentTime;
+        inputGainNode.gain.cancelScheduledValues(now);
+        inputGainNode.gain.setValueAtTime(inputGainNode.gain.value, now);
+        inputGainNode.gain.linearRampToValueAtTime(1.0, now + duration);
+    }
+
+    function fadeOut(duration = 0.05) {
+        if (!inputGainNode || !audioContext) return Promise.resolve();
+        return new Promise((resolve) => {
+            const now = audioContext.currentTime;
+            inputGainNode.gain.cancelScheduledValues(now);
+            inputGainNode.gain.setValueAtTime(inputGainNode.gain.value, now);
+            inputGainNode.gain.linearRampToValueAtTime(0, now + duration);
+            setTimeout(resolve, duration * 1000 + 10);
+        });
+    }
+
     function play() {
         if (!audioBuffer || isPlaying) return;
         resume();
 
-        if (!tubeProcessor) {
+        if (!audioGraphReady) {
             createAudioGraph();
         }
 
-        stopSource();
+        stopSourceOnly().then(() => {
+            sourceNode = audioContext.createBufferSource();
+            sourceNode.buffer = audioBuffer;
 
-        sourceNode = audioContext.createBufferSource();
-        sourceNode.buffer = audioBuffer;
+            connectSource(sourceNode);
 
-        sourceNode.connect(bassFilter);
-        bassFilter.connect(driveGainNode);
-        driveGainNode.connect(tubeProcessor);
-        tubeProcessor.connect(warmFilter);
-        warmFilter.connect(trebleFilter);
-        trebleFilter.connect(gainNode);
-        gainNode.connect(splitter);
-        splitter.connect(analyserL, 0);
-        splitter.connect(analyserR, 1);
-        analyserL.connect(merger, 0, 0);
-        analyserR.connect(merger, 0, 1);
-        merger.connect(audioContext.destination);
+            const offset = pauseTime || 0;
+            startTime = audioContext.currentTime - offset;
+            sourceNode.start(0, offset);
+            fadeIn(0.05);
 
-        const offset = pauseTime || 0;
-        startTime = audioContext.currentTime - offset;
-        sourceNode.start(0, offset);
+            isPlaying = true;
+            startVisualization();
 
-        isPlaying = true;
-        startVisualization();
-
-        sourceNode.onended = () => {
-            if (isPlaying && !isMicActive) {
-                stop();
-                pauseTime = 0;
-            }
-        };
+            sourceNode.onended = () => {
+                if (isPlaying && !isMicActive) {
+                    stop();
+                    pauseTime = 0;
+                }
+            };
+        });
     }
 
     function pause() {
         if (!isPlaying || !sourceNode) return;
         
-        pauseTime = audioContext.currentTime - startTime;
-        sourceNode.stop();
-        sourceNode = null;
-        isPlaying = false;
-        stopVisualization();
-    }
-
-    function stop() {
-        stopSource();
-        isPlaying = false;
-        pauseTime = 0;
-        stopVisualization();
-    }
-
-    function stopSource() {
-        if (sourceNode) {
+        fadeOut(0.03).then(() => {
+            pauseTime = audioContext.currentTime - startTime;
             try {
                 sourceNode.stop();
             } catch (e) {}
             sourceNode = null;
-        }
-        if (micSource) {
-            try {
-                micSource.disconnect();
-            } catch (e) {}
-            micSource = null;
-        }
-        if (micStream) {
-            micStream.getTracks().forEach(track => track.stop());
-            micStream = null;
-        }
-        isMicActive = false;
+            isPlaying = false;
+            stopVisualization();
+        });
+    }
+
+    function stop() {
+        fadeOut(0.05).then(() => {
+            stopSourceOnly();
+            isPlaying = false;
+            pauseTime = 0;
+            stopVisualization();
+        });
+    }
+
+    function stopSourceOnly() {
+        return fadeOut(0.02).then(() => {
+            if (sourceNode) {
+                try {
+                    disconnectSource(sourceNode);
+                } catch (e) {}
+                try {
+                    sourceNode.stop();
+                } catch (e) {}
+                sourceNode = null;
+            }
+            if (micSource) {
+                try {
+                    disconnectSource(micSource);
+                } catch (e) {}
+                try {
+                    micSource.disconnect();
+                } catch (e) {}
+                micSource = null;
+            }
+            if (micStream) {
+                micStream.getTracks().forEach(track => track.stop());
+                micStream = null;
+            }
+            isMicActive = false;
+        });
     }
 
     async function startMicrophone() {
         if (!audioContext) init();
         resume();
 
-        if (!tubeProcessor) {
+        if (!audioGraphReady) {
             createAudioGraph();
         }
 
@@ -298,22 +438,11 @@ const TubeAmpProcessor = (function() {
                 }
             });
 
-            stopSource();
+            await stopSourceOnly();
 
             micSource = audioContext.createMediaStreamSource(micStream);
-
-            micSource.connect(bassFilter);
-            bassFilter.connect(driveGainNode);
-            driveGainNode.connect(tubeProcessor);
-            tubeProcessor.connect(warmFilter);
-            warmFilter.connect(trebleFilter);
-            trebleFilter.connect(gainNode);
-            gainNode.connect(splitter);
-            splitter.connect(analyserL, 0);
-            splitter.connect(analyserR, 1);
-            analyserL.connect(merger, 0, 0);
-            analyserR.connect(merger, 0, 1);
-            merger.connect(audioContext.destination);
+            connectSource(micSource);
+            fadeIn(0.1);
 
             isMicActive = true;
             isPlaying = true;
@@ -327,9 +456,10 @@ const TubeAmpProcessor = (function() {
     }
 
     function stopMicrophone() {
-        stopSource();
-        isPlaying = false;
-        stopVisualization();
+        stopSourceOnly().then(() => {
+            isPlaying = false;
+            stopVisualization();
+        });
     }
 
     function startVisualization() {
